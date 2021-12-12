@@ -1,0 +1,53 @@
+delete_if_exists <- function(file) if(file.exists(file)) file.remove(file)
+
+check_line <- function(line){
+    lib_names <- system2(command="apt-cache",args = "pkgnames",stdout = TRUE)
+    results<-Map(function(x) grepl(paste0("deb: ",x," "),line),paste0("\\Q",lib_names,"\\E"))
+    found_libs <- data.frame(lib_names,found = as.logical(results))
+    extracted_libs<-found_libs$lib_names[found_libs$found == T]
+    ifelse(length(extracted_libs) != 0,as.character(extracted_libs),NA_character_)
+}
+
+is_done <- function(line){
+    done_found <- grepl("DONE",line)
+    error_found <- grepl("ERROR: dependenc",line)
+    ifelse(sum(c(done_found,error_found))>0,T,F)
+}
+
+check_file <- function(file){
+    print(paste("Checking file",file))
+    lines<-readLines(file)
+    done  = as.logical(Map(is_done,lines))
+    if(sum(done)>0) return(NA_character_)
+    found = Map(check_line,lines)
+    results<-na.omit(unique(unlist(found)))
+    print(paste("Libs found",Reduce(paste,results)))
+    results
+}
+get_missing_libs <- function(){
+    #get files in folder
+    files <- list.files()
+    #get files to check for lib names
+    names_and_endings <- data.frame(files = files, is_output = as.logical(Map(function(x) grepl(".out",x),files)))
+    files_to_read<-names_and_endings[names_and_endings$is_output == T,"files"]
+    results <- Map(check_file,files_to_read)
+    results <- as.character(results)
+    results <- na.omit(results)
+}
+
+install.packages2 <- function(pkgs){
+    install.packages(pkgs,keep_outputs=T)
+    missing_libs <- get_missing_libs()
+    #Success condition
+    if(length(missing_libs)==0){
+        files <- list.files()
+        #get files to delete
+        names_and_endings <- data.frame(files = files, is_output = as.logical(Map(function(x) grepl(".out",x),files)))
+        files_to_delete<-names_and_endings[names_and_endings$is_output == T,"files"]
+        Map(delete_if_exists,files_to_delete)
+        return("Success")}
+    missing_libs_str <- paste(missing_libs,collapse=" ")
+    system2(command="apt-get",args = paste("install",missing_libs_str,"-y"),stdout=T)
+    install.packages2(pkgs)
+}
+
